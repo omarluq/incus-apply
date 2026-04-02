@@ -1,0 +1,172 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/abiosoft/incus-apply/refs/heads/main/schema/incus-apply.schema.json",
+  "title": "incus-apply configuration",
+  "description": "Schema for incus-apply .incus.yaml configuration files. Each YAML document in the file is either a resource definition or a vars declaration.",
+  "oneOf": [
+    {
+      "description": "An Incus resource definition.",
+      "type": "object",
+      "properties": {
+        "config": {
+          "description": "Key-value configuration options",
+          "type": "object",
+          "patternProperties": {
+            ".*": {
+              "type": "string"
+            }
+          }
+        },
+        "description": {
+          "description": "Resource description",
+          "type": "string"
+        },
+        "devices": {
+          "description": "Device configurations",
+          "type": "object",
+          "patternProperties": {
+            ".*": {
+              "type": "object",
+              "patternProperties": {
+                ".*": {}
+              }
+            }
+          }
+        },
+        "driver": {
+          "description": "Storage driver (dir, zfs, btrfs, lvm, ceph)",
+          "type": "string"
+        },
+        "egress": {
+          "description": "Egress firewall rules",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "patternProperties": {
+              ".*": {}
+            }
+          }
+        },
+        "empty": {
+          "description": "Create an empty instance (no image)",
+          "type": "boolean"
+        },
+        "image": {
+          "description": "Image source for instances (e.g., images:debian/12, docker:caddy)",
+          "type": "string"
+        },
+        "ingress": {
+          "description": "Ingress firewall rules",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "patternProperties": {
+              ".*": {}
+            }
+          }
+        },
+        "name": {
+          "description": "Resource name (unique within type)",
+          "type": "string"
+        },
+        "network": {
+          "description": "Network to attach to the instance",
+          "type": "string"
+        },
+        "networkType": {
+          "description": "Network type (bridge, ovn, macvlan, sriov, physical)",
+          "type": "string"
+        },
+        "pool": {
+          "description": "Storage pool name (required for storage volumes/buckets)",
+          "type": "string"
+        },
+        "profiles": {
+          "description": "Profiles to apply to the instance",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "project": {
+          "description": "Incus project (can be overridden by --project flag)",
+          "type": "string"
+        },
+        "source": {
+          "description": "Source path or device for storage pool",
+          "type": "string"
+        },
+        "storage": {
+          "description": "Storage pool for the instance root disk",
+          "type": "string"
+        },
+        "target": {
+          "description": "Cluster member target",
+          "type": "string"
+        },
+        "type": {
+          "description": "Resource type",
+          "type": "string",
+          "enum": [
+            "instance",
+            "profile",
+            "network",
+            "network-acl",
+            "network-zone",
+            "storage-pool",
+            "storage-volume",
+            "storage-bucket",
+            "project",
+            "cluster-group"
+          ]
+        },
+        "vm": {
+          "description": "Create a virtual machine instead of a container",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type",
+        "name"
+      ]
+    },
+    {
+      "description": "Variable declarations for interpolation in resource configs.",
+      "type": "object",
+      "properties": {
+        "files": {
+          "description": "Paths to .env files to load variables from.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "global": {
+          "description": "If true, variables are shared across all files instead of being file-scoped.",
+          "type": "boolean"
+        },
+        "type": {
+          "description": "Must be 'vars' for variable declarations.",
+          "type": "string",
+          "enum": [
+            "vars"
+          ]
+        },
+        "vars": {
+          "description": "Inline variable definitions (key-value pairs).",
+          "type": "object",
+          "patternProperties": {
+            ".*": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

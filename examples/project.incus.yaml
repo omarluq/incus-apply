@@ -1,0 +1,9 @@
+# Project for isolating example resources
+type: project
+name: example
+config:
+  features.images: "true"
+  features.networks: "false"
+  features.profiles: "true"
+  features.storage.volumes: "true"
+description: Example project

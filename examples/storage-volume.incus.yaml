@@ -1,0 +1,7 @@
+# Custom storage volume
+type: storage-volume
+name: data
+pool: default
+config:
+  size: 20GiB
+description: Persistent custom storage volume

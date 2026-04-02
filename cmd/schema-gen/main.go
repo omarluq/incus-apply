@@ -1,0 +1,213 @@
+// Command schema-gen generates JSON Schema for incus-apply configuration files.
+//
+// Usage:
+//
+//	go run ./cmd/schema-gen > schema/incus-apply.schema.json
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"reflect"
+	"strings"
+
+	"github.com/abiosoft/incus-apply/internal/config"
+	"github.com/abiosoft/incus-apply/internal/resource"
+)
+
+// Schema represents a JSON Schema document.
+type Schema struct {
+	Schema            string             `json:"$schema,omitempty"`
+	ID                string             `json:"$id,omitempty"`
+	Title             string             `json:"title,omitempty"`
+	Description       string             `json:"description,omitempty"`
+	Type              string             `json:"type,omitempty"`
+	OneOf             []Schema           `json:"oneOf,omitempty"`
+	Properties        map[string]*Schema `json:"properties,omitempty"`
+	Required          []string           `json:"required,omitempty"`
+	Items             *Schema            `json:"items,omitempty"`
+	Enum              []string           `json:"enum,omitempty"`
+	PatternProperties map[string]*Schema `json:"patternProperties,omitempty"`
+
+	AdditionalProperties *bool `json:"additionalProperties,omitempty"`
+}
+
+func main() {
+	schema := generateRootSchema()
+
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(schema); err != nil {
+		fmt.Fprintf(os.Stderr, "error encoding schema: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func generateRootSchema() Schema {
+	resourceTypes := collectResourceTypes()
+
+	return Schema{
+		Schema:      "https://json-schema.org/draft/2020-12/schema",
+		ID:          "https://raw.githubusercontent.com/abiosoft/incus-apply/refs/heads/main/schema/incus-apply.schema.json",
+		Title:       "incus-apply configuration",
+		Description: "Schema for incus-apply .incus.yaml configuration files. Each YAML document in the file is either a resource definition or a vars declaration.",
+		OneOf: []Schema{
+			generateResourceSchema(resourceTypes),
+			generateVarsSchema(),
+		},
+	}
+}
+
+func collectResourceTypes() []string {
+	var types []string
+	for _, t := range []resource.Type{
+		resource.TypeInstance,
+		resource.TypeProfile,
+		resource.TypeNetwork,
+		resource.TypeNetworkACL,
+		resource.TypeNetworkZone,
+		resource.TypeStoragePool,
+		resource.TypeStorageVolume,
+		resource.TypeStorageBucket,
+		resource.TypeProject,
+		resource.TypeClusterGroup,
+	} {
+		types = append(types, string(t))
+	}
+	return types
+}
+
+func generateResourceSchema(resourceTypes []string) Schema {
+	properties := structProperties(reflect.TypeOf(config.Resource{}))
+	properties["type"] = &Schema{
+		Type:        "string",
+		Description: "Resource type",
+		Enum:        resourceTypes,
+	}
+
+	return Schema{
+		Type:        "object",
+		Description: "An Incus resource definition.",
+		Properties:  properties,
+		Required:    []string{"type", "name"},
+	}
+}
+
+func generateVarsSchema() Schema {
+	falseVal := false
+	return Schema{
+		Type:        "object",
+		Description: "Variable declarations for interpolation in resource configs.",
+		Properties: map[string]*Schema{
+			"type": {
+				Type:        "string",
+				Description: "Must be 'vars' for variable declarations.",
+				Enum:        []string{"vars"},
+			},
+			"vars": {
+				Type:        "object",
+				Description: "Inline variable definitions (key-value pairs).",
+				PatternProperties: map[string]*Schema{
+					".*": {Type: "string"},
+				},
+				AdditionalProperties: &falseVal,
+			},
+			"files": {
+				Type:        "array",
+				Description: "Paths to .env files to load variables from.",
+				Items:       &Schema{Type: "string"},
+			},
+			"global": {
+				Type:        "boolean",
+				Description: "If true, variables are shared across all files instead of being file-scoped.",
+			},
+		},
+		Required:             []string{"type"},
+		AdditionalProperties: &falseVal,
+	}
+}
+
+func structProperties(t reflect.Type) map[string]*Schema {
+	properties := make(map[string]*Schema)
+
+	for i := range t.NumField() {
+		field := t.Field(i)
+
+		if field.Anonymous {
+			for k, v := range structProperties(field.Type) {
+				properties[k] = v
+			}
+			continue
+		}
+
+		yamlTag := field.Tag.Get("yaml")
+		if yamlTag == "-" || yamlTag == "" {
+			continue
+		}
+
+		name, _ := strings.CutSuffix(yamlTag, ",omitempty")
+		description := fieldDescription(field)
+		schema := goTypeToSchema(field.Type, description)
+		properties[name] = schema
+	}
+
+	return properties
+}
+
+func goTypeToSchema(t reflect.Type, description string) *Schema {
+	switch t.Kind() {
+	case reflect.String:
+		return &Schema{Type: "string", Description: description}
+	case reflect.Bool:
+		return &Schema{Type: "boolean", Description: description}
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return &Schema{Type: "integer", Description: description}
+	case reflect.Float32, reflect.Float64:
+		return &Schema{Type: "number", Description: description}
+	case reflect.Slice:
+		items := goTypeToSchema(t.Elem(), "")
+		return &Schema{Type: "array", Description: description, Items: items}
+	case reflect.Map:
+		s := &Schema{Type: "object", Description: description}
+		if t.Key().Kind() == reflect.String {
+			valueSchema := goTypeToSchema(t.Elem(), "")
+			s.PatternProperties = map[string]*Schema{
+				".*": valueSchema,
+			}
+		}
+		return s
+	case reflect.Interface:
+		return &Schema{Description: description}
+	default:
+		return &Schema{Description: description}
+	}
+}
+
+func fieldDescription(f reflect.StructField) string {
+	descriptions := map[string]string{
+		"Type":        "Resource type",
+		"Name":        "Resource name (unique within type)",
+		"Project":     "Incus project (can be overridden by --project flag)",
+		"Config":      "Key-value configuration options",
+		"Devices":     "Device configurations",
+		"Description": "Resource description",
+		"Image":       "Image source for instances (e.g., images:debian/12, docker:caddy)",
+		"VM":          "Create a virtual machine instead of a container",
+		"Empty":       "Create an empty instance (no image)",
+		"Profiles":    "Profiles to apply to the instance",
+		"Storage":     "Storage pool for the instance root disk",
+		"Network":     "Network to attach to the instance",
+		"Target":      "Cluster member target",
+		"Pool":        "Storage pool name (required for storage volumes/buckets)",
+		"NetworkType": "Network type (bridge, ovn, macvlan, sriov, physical)",
+		"Driver":      "Storage driver (dir, zfs, btrfs, lvm, ceph)",
+		"Source":      "Source path or device for storage pool",
+		"Ingress":     "Ingress firewall rules",
+		"Egress":      "Egress firewall rules",
+	}
+	if desc, ok := descriptions[f.Name]; ok {
+		return desc
+	}
+	return ""
+}

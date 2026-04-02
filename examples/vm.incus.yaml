@@ -1,0 +1,10 @@
+# Alpine virtual machine
+type: instance
+name: gateway
+image: images:alpine/edge
+vm: true
+config:
+  limits.cpu: "1"
+  limits.memory: 512MiB
+  security.secureboot: "false"
+description: Alpine virtual machine

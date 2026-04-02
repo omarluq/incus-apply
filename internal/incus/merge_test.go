@@ -1,0 +1,351 @@
+package incus
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/abiosoft/incus-apply/internal/config"
+	"gopkg.in/yaml.v3"
+)
+
+func TestDesiredForApply_AddsTrackingState(t *testing.T) {
+	res := &config.Resource{
+		Base: config.Base{
+			Type: "instance",
+			Name: "test",
+			Config: map[string]string{
+				"user.key": "value",
+			},
+		},
+	}
+
+	prepared, snapshot, err := desiredForApply(res)
+	if err != nil {
+		t.Fatalf("desiredForApply() error = %v", err)
+	}
+	if prepared.Config[createdByKey] != "true" {
+		t.Fatalf("created marker = %q, want %q", prepared.Config[createdByKey], "true")
+	}
+	if prepared.Config[currentStateKey] != snapshot {
+		t.Fatalf("current state marker mismatch")
+	}
+	if strings.Contains(snapshot, createdByKey) || strings.Contains(snapshot, currentStateKey) {
+		t.Fatalf("snapshot should not include tracking keys, got %q", snapshot)
+	}
+}
+
+func TestMergeConfigs_OverlaysUserConfig(t *testing.T) {
+	current := `
+config:
+  user.key1: value1
+  volatile.base_image: abc123
+devices: {}
+`
+	desired := &config.Resource{
+		Base: config.Base{
+			Type: "instance",
+			Name: "test",
+			Config: map[string]string{
+				"user.key1": "updated",
+				"user.key2": "new",
+			},
+		},
+	}
+
+	merged, err := mergeConfigs(current, desired)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var result map[string]any
+	if err := yaml.Unmarshal(merged, &result); err != nil {
+		t.Fatalf("failed to unmarshal merged: %v", err)
+	}
+
+	cfg := result["config"].(map[string]any)
+	if cfg["user.key1"] != "updated" {
+		t.Errorf("expected user.key1=updated, got %v", cfg["user.key1"])
+	}
+	if cfg["user.key2"] != "new" {
+		t.Errorf("expected user.key2=new, got %v", cfg["user.key2"])
+	}
+	if cfg["volatile.base_image"] != "abc123" {
+		t.Errorf("expected volatile.base_image preserved, got %v", cfg["volatile.base_image"])
+	}
+}
+
+func TestMergeConfigs_ReplacesDevices(t *testing.T) {
+	current := `
+devices:
+  eth0:
+    type: nic
+    network: old-net
+`
+	desired := &config.Resource{
+		Base: config.Base{
+			Type: "instance",
+			Name: "test",
+			Devices: map[string]map[string]any{
+				"eth0": {"type": "nic", "network": "new-net"},
+			},
+		},
+	}
+
+	merged, err := mergeConfigs(current, desired)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var result map[string]any
+	if err := yaml.Unmarshal(merged, &result); err != nil {
+		t.Fatalf("failed to unmarshal merged: %v", err)
+	}
+
+	devices := result["devices"].(map[string]any)
+	eth0 := devices["eth0"].(map[string]any)
+	if eth0["network"] != "new-net" {
+		t.Errorf("expected network=new-net, got %v", eth0["network"])
+	}
+}
+
+func TestMergeConfigs_InstanceProfiles(t *testing.T) {
+	current := `
+profiles:
+  - default
+`
+	desired := &config.Resource{
+		Base: config.Base{
+			Type: "instance",
+			Name: "test",
+		},
+		Profiles: []string{"default", "custom"},
+	}
+
+	merged, err := mergeConfigs(current, desired)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var result map[string]any
+	if err := yaml.Unmarshal(merged, &result); err != nil {
+		t.Fatalf("failed to unmarshal merged: %v", err)
+	}
+
+	profiles := result["profiles"].([]any)
+	if len(profiles) != 2 {
+		t.Fatalf("expected 2 profiles, got %d", len(profiles))
+	}
+	if profiles[1] != "custom" {
+		t.Errorf("expected second profile=custom, got %v", profiles[1])
+	}
+}
+
+func TestMergeConfigs_NetworkACLRules(t *testing.T) {
+	current := `
+ingress:
+  - action: allow
+    source: 10.0.0.0/8
+`
+	desired := &config.Resource{
+		Base: config.Base{
+			Type: "network-acl",
+			Name: "test-acl",
+		},
+		Ingress: []map[string]any{
+			{"action": "allow", "source": "192.168.0.0/16"},
+		},
+		Egress: []map[string]any{
+			{"action": "drop"},
+		},
+	}
+
+	merged, err := mergeConfigs(current, desired)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var result map[string]any
+	if err := yaml.Unmarshal(merged, &result); err != nil {
+		t.Fatalf("failed to unmarshal merged: %v", err)
+	}
+
+	ingress := result["ingress"].([]any)
+	if len(ingress) != 1 {
+		t.Fatalf("expected 1 ingress rule (replaced), got %d", len(ingress))
+	}
+	rule := ingress[0].(map[string]any)
+	if rule["source"] != "192.168.0.0/16" {
+		t.Errorf("expected source=192.168.0.0/16, got %v", rule["source"])
+	}
+
+	egress := result["egress"].([]any)
+	if len(egress) != 1 {
+		t.Fatalf("expected 1 egress rule, got %d", len(egress))
+	}
+}
+
+func TestMergeConfigs_PreservesUnmanagedFields(t *testing.T) {
+	current := `
+architecture: x86_64
+status: Running
+config:
+  volatile.uuid: abc
+`
+	desired := &config.Resource{
+		Base: config.Base{
+			Type:        "instance",
+			Name:        "test",
+			Description: "updated desc",
+		},
+	}
+
+	merged, err := mergeConfigs(current, desired)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var result map[string]any
+	if err := yaml.Unmarshal(merged, &result); err != nil {
+		t.Fatalf("failed to unmarshal merged: %v", err)
+	}
+
+	if result["architecture"] != "x86_64" {
+		t.Errorf("expected architecture preserved, got %v", result["architecture"])
+	}
+	if result["description"] != "updated desc" {
+		t.Errorf("expected description=updated desc, got %v", result["description"])
+	}
+}
+
+func TestMergeConfigs_NilConfigPreservesCurrent(t *testing.T) {
+	current := `
+config:
+  user.key: value
+`
+	desired := &config.Resource{
+		Base: config.Base{
+			Type: "instance",
+			Name: "test",
+		},
+	}
+
+	merged, err := mergeConfigs(current, desired)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var result map[string]any
+	if err := yaml.Unmarshal(merged, &result); err != nil {
+		t.Fatalf("failed to unmarshal merged: %v", err)
+	}
+
+	cfg := result["config"].(map[string]any)
+	if cfg["user.key"] != "value" {
+		t.Errorf("expected config preserved when desired is nil, got %v", cfg["user.key"])
+	}
+}
+
+func TestMergeConfigs_ManagedStateReplacesPreviousManagedKeysOnly(t *testing.T) {
+	current := `
+config:
+  user.old: old
+  user.custom: keep
+  user.incus-apply.created: "true"
+  user.incus-apply.current: |
+    config:
+      user.old: old
+    devices:
+      old0:
+        type: nic
+        network: old-net
+devices:
+  old0:
+    type: nic
+    network: old-net
+  extra0:
+    type: nic
+    network: keep-net
+`
+	desired := &config.Resource{
+		Base: config.Base{
+			Type: "instance",
+			Name: "test",
+			Config: map[string]string{
+				"user.new": "new",
+			},
+			Devices: map[string]map[string]any{
+				"new0": {"type": "nic", "network": "new-net"},
+			},
+		},
+	}
+
+	merged, err := mergeConfigs(current, desired)
+	if err != nil {
+		t.Fatalf("mergeConfigs() error = %v", err)
+	}
+
+	var result map[string]any
+	if err := yaml.Unmarshal(merged, &result); err != nil {
+		t.Fatalf("failed to unmarshal merged: %v", err)
+	}
+
+	cfg := result["config"].(map[string]any)
+	if _, ok := cfg["user.old"]; ok {
+		t.Fatalf("expected previous managed key to be removed")
+	}
+	if cfg["user.custom"] != "keep" {
+		t.Fatalf("expected custom config preserved, got %v", cfg["user.custom"])
+	}
+	if cfg["user.new"] != "new" {
+		t.Fatalf("expected new managed config applied, got %v", cfg["user.new"])
+	}
+	if cfg[createdByKey] != "true" {
+		t.Fatalf("expected created marker to remain set, got %v", cfg[createdByKey])
+	}
+
+	devices := result["devices"].(map[string]any)
+	if _, ok := devices["old0"]; ok {
+		t.Fatalf("expected previous managed device to be removed")
+	}
+	if _, ok := devices["extra0"]; !ok {
+		t.Fatalf("expected unmanaged device to be preserved")
+	}
+	if _, ok := devices["new0"]; !ok {
+		t.Fatalf("expected new managed device to be applied")
+	}
+}
+
+func TestCleanMap(t *testing.T) {
+	m := map[string]any{
+		"keep":   "value",
+		"remove": nil,
+		"nested": map[string]any{
+			"keep":   "inner",
+			"remove": nil,
+		},
+		"empty_string": "",
+		"empty_map":    map[string]any{},
+	}
+
+	cleanMap(m)
+
+	if _, ok := m["remove"]; ok {
+		t.Error("expected nil key to be removed")
+	}
+	if m["keep"] != "value" {
+		t.Error("expected non-nil key to be preserved")
+	}
+	nested := m["nested"].(map[string]any)
+	if _, ok := nested["remove"]; ok {
+		t.Error("expected nested nil key to be removed")
+	}
+	if nested["keep"] != "inner" {
+		t.Error("expected nested non-nil key to be preserved")
+	}
+	if m["empty_string"] != "" {
+		t.Error("expected empty string to be preserved")
+	}
+	if _, ok := m["empty_map"]; !ok {
+		t.Error("expected empty map to be preserved")
+	}
+}

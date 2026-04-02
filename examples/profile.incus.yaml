@@ -1,0 +1,7 @@
+# Shared profile with resource limits
+type: profile
+name: web
+config:
+  limits.cpu: "2"
+  limits.memory: 512MiB
+description: Web server resource limits profile

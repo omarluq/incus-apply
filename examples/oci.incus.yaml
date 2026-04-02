@@ -1,0 +1,5 @@
+# Caddy web server as an OCI container
+type: instance
+name: caddy
+image: docker:caddy
+description: Caddy web server (OCI)

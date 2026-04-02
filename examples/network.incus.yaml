@@ -1,0 +1,10 @@
+# Bridge network
+type: network
+name: webnet
+networkType: bridge
+config:
+  ipv4.address: 10.10.10.1/24
+  ipv4.dhcp: "true"
+  ipv4.nat: "true"
+  ipv6.address: none
+description: Internal bridge network for web services

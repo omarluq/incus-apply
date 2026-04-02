@@ -1,0 +1,63 @@
+package apply
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/abiosoft/incus-apply/internal/config"
+	"github.com/abiosoft/incus-apply/internal/resource"
+)
+
+// formatResourceID creates a scope-aware display identifier for a resource.
+func formatResourceID(res *config.Resource) string {
+	resourcePath := res.Type
+	if usesPoolScope(resource.Type(res.Type)) && res.Pool != "" {
+		resourcePath += "/" + res.Pool
+	}
+	resourcePath += "/" + res.Name
+
+	if project := displayProject(res); project != "" {
+		return project + ":" + resourcePath
+	}
+	return resourcePath
+}
+
+func displayProject(res *config.Resource) string {
+	if !usesProjectScope(resource.Type(res.Type)) {
+		return ""
+	}
+	if strings.TrimSpace(res.Project) == "" {
+		return "default"
+	}
+	return res.Project
+}
+
+func usesProjectScope(resourceType resource.Type) bool {
+	switch resourceType {
+	case resource.TypeProject, resource.TypeStoragePool, resource.TypeClusterGroup:
+		return false
+	default:
+		return true
+	}
+}
+
+func usesPoolScope(resourceType resource.Type) bool {
+	switch resourceType {
+	case resource.TypeStorageVolume, resource.TypeStorageBucket:
+		return true
+	default:
+		return false
+	}
+}
+
+func validateUniqueResources(resources []*config.Resource) error {
+	seen := make(map[string]*config.Resource, len(resources))
+	for _, res := range resources {
+		key := formatResourceID(res)
+		if previous, ok := seen[key]; ok {
+			return fmt.Errorf("duplicate resource %q defined in %s and %s", key, previous.SourceFile, res.SourceFile)
+		}
+		seen[key] = res
+	}
+	return nil
+}

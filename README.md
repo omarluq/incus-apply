@@ -1,2 +1,305 @@
 # incus-apply
-Declarative Incus
+
+Declarative configuration management for [Incus](https://linuxcontainers.org/incus/).
+
+## Installation
+
+```bash
+go install github.com/abiosoft/incus-apply/cmd/incus-apply@latest
+```
+
+Or build from source:
+
+```bash
+git clone https://github.com/abiosoft/incus-apply
+cd incus-apply
+go build -o incus-apply ./cmd/incus-apply
+```
+
+## Quick Start
+
+1. Create a config file `debian.incus.yaml`:
+
+```yaml
+type: instance
+name: debian
+image: images:debian/12
+profiles:
+  - default
+config:
+  limits.cpu: "2"
+  limits.memory: 1GiB
+```
+
+2. Apply it:
+
+```bash
+incus-apply debian.incus.yaml
+```
+
+## Usage
+
+```bash
+# Apply all configs in current directory
+incus-apply .
+
+# Apply specific files
+incus-apply instance.incus.yaml network.incus.yaml
+
+# Apply recursively from a directory
+incus-apply ./configs/ -r
+
+# Apply from stdin
+cat instance.incus.yaml | incus-apply -
+
+# Apply from URL
+incus-apply https://example.com/instance.incus.yaml
+
+# Override remote fetch and incus command timeouts
+incus-apply . --fetch-timeout=10s --command-timeout=2m
+
+# Auto-accept changes without prompting
+incus-apply . -y
+
+# In non-interactive environments, use --yes to apply changes
+incus-apply . -yq
+
+# Silent mode for CI (no diff, no prompt)
+incus-apply . -yq
+
+# Show diff only (no apply)
+incus-apply . --diff
+
+# Show diff only and reveal environment values in preview
+incus-apply . --diff --show-env
+
+# Replace resources when create-only fields change
+incus-apply . --replace -y
+
+# Show diff as JSON (for tooling)
+incus-apply . --diff=json
+
+# Delete resources defined in configs
+incus-apply . -d -y
+
+# Stop running instances before applying (for config keys that require restart)
+incus-apply . --stop
+
+# Create instances without starting them
+incus-apply . --launch=false
+
+# Apply to a specific project
+incus-apply . --project myproject
+```
+
+## Configuration Format
+
+Configuration files must have the `.incus.yaml`, `.incus.yml`, or `.incus.json` extension.
+
+### Basic Example
+
+```yaml
+# web-server.incus.yaml
+type: instance
+name: web-server
+image: images:debian/12
+profiles:
+  - default
+config:
+  limits.cpu: "2"
+  limits.memory: 1GiB
+devices:
+  root:
+    type: disk
+    pool: default
+    path: /
+    size: 10GiB
+description: Web server container
+```
+
+### Multi-Document YAML
+
+Multiple resources can be defined in a single file using YAML document separators (`---`):
+
+```yaml
+# stack.incus.yaml
+---
+type: profile
+name: app-profile
+config:
+  limits.memory: 512MiB
+---
+type: instance
+name: app-1
+image: images:alpine/3.19
+profiles:
+  - default
+  - app-profile
+---
+type: instance
+name: app-2
+image: images:alpine/3.19
+profiles:
+  - default
+  - app-profile
+```
+
+## Variables
+
+Declare variables with `type: vars` and reference them with `$VAR` or `${VAR}` in resource documents.
+
+```yaml
+---
+type: vars
+vars:
+  NODE_ENV: production
+  MYSQL_DATABASE: app
+---
+type: instance
+name: api
+image: docker:node:20
+config:
+  environment.NODE_ENV: $NODE_ENV
+  environment.MYSQL_DATABASE: $MYSQL_DATABASE
+```
+
+For full variable usage, scoping rules, and syntax, see [docs/configuration-reference.md](./docs/configuration-reference.md).
+
+## Supported Resource Types
+
+| Type             | Description                           |
+| ---------------- | ------------------------------------- |
+| `instance`       | Containers and virtual machines       |
+| `profile`        | Configuration profiles                |
+| `network`        | Networks (bridge, ovn, macvlan, etc.) |
+| `network-acl`    | Network access control lists          |
+| `network-zone`   | DNS zones                             |
+| `storage-pool`   | Storage pools                         |
+| `storage-volume` | Custom storage volumes                |
+| `storage-bucket` | S3-compatible storage buckets         |
+| `project`        | Projects for resource isolation       |
+| `cluster-group`  | Cluster member groups                 |
+
+## Resource Dependency Ordering
+
+Resources are automatically created in dependency order:
+
+1. Projects
+2. Storage pools
+3. Networks
+4. Network ACLs
+5. Network zones
+6. Storage volumes
+7. Storage buckets
+8. Cluster groups
+9. Profiles
+10. Instances
+
+For deletion, the order is reversed.
+
+## Common Configuration Fields
+
+| Field         | Type   | Description                                    |
+| ------------- | ------ | ---------------------------------------------- |
+| `type`        | string | **Required.** Resource type                    |
+| `name`        | string | **Required.** Resource name                    |
+| `project`     | string | Incus project (overridden by `--project` flag) |
+| `config`      | map    | Resource configuration options                 |
+| `devices`     | map    | Device configurations                          |
+| `description` | string | Resource description                           |
+
+For the full per-resource field reference, see [docs/configuration-reference.md](./docs/configuration-reference.md).
+
+## CLI Flags
+
+```
+Usage:
+  incus-apply [flags] [file...]
+
+Arguments:
+  file...   Config files, directories, URLs, or '-' for stdin
+
+Flags:
+  -r, --recursive        Recursively find .incus.yaml/.incus.json files in directories
+  -d, --delete           Delete resources instead of creating/updating
+  -y, --yes              Auto-accept and apply changes without prompting
+    --diff [text|json] Show preview only without applying
+      --replace          Delete and recreate managed resources when create-only fields change
+      --show-env         Show actual environment config values in preview output instead of redacting them
+    --fetch-timeout duration
+             Timeout for fetching remote config URLs (default: 30s, 0 disables)
+      --stop             Force-stop running instances before applying updates
+      --launch           Start newly created instances after creation (default: true)
+      --fail-fast        Stop on first error instead of continuing
+  -h, --help             Help for incus-apply
+      --version          Print version information
+
+Incus Global Flags (passed through):
+    --command-timeout duration
+             Timeout for individual incus commands (default: 5m, 0 disables)
+      --project string   Incus project to use
+      --debug            Show debug output from incus
+  -v, --verbose          Show verbose output from incus
+  -q, --quiet            Suppress progress output
+      --force-local      Force using local unix socket
+```
+
+## Examples
+
+See the [examples](./examples/) directory for sample configurations.
+
+## Advanced Notes
+
+<details>
+<summary>Preview, diff, and apply behavior</summary>
+
+By default, `incus-apply` shows a preview and asks for confirmation before making changes.
+
+- Use `--diff` to preview only.
+- Use `--diff=json` for machine-readable output.
+- In non-interactive environments, use `--yes` to proceed.
+- If planning hits errors, the preview is still shown but apply/delete stops before making changes.
+- Instance `config.environment.*` values are redacted in preview output by default.
+- Use `--show-env` to reveal those values in preview output when needed.
+
+Preview output identifies resources by effective scope:
+
+- Project-scoped resources use `project:type/name`, for example `default:instance/web`.
+- Pool-scoped storage resources use `project:type/pool/name`, for example `default:storage-volume/pool1/data`.
+- Global resources omit the project prefix and use `type/name`.
+
+</details>
+
+<details>
+<summary>Managed state and unmanaged resources</summary>
+
+On resources created or updated by `incus-apply`, the tool stores managed state in the resource config under `user.incus-apply.created=true` and `user.incus-apply.current=<yaml snapshot>`.
+
+For managed resources, diffs are computed from that stored snapshot instead of raw live state.
+
+If the tracking keys are missing or invalid, the resource is treated as unmanaged, a warning is shown, and diff/update falls back to live-state behavior.
+
+</details>
+
+<details>
+<summary>Recreate-required changes</summary>
+
+Some fields are create-only, such as an instance image, storage pool driver, or network type.
+
+When those fields change on a managed resource, the preview is marked `recreate required` and apply stops before making changes.
+
+Use `--replace` to delete and recreate the resource in one run.
+
+</details>
+
+## Schema And Editor Setup
+
+For schema URL and editor setup, see [docs/editor-schema.md](./docs/editor-schema.md).
+
+## FAQ
+
+See [docs/faq.md](./docs/faq.md) for common questions and operational notes.
+
+## License
+
+Apache 2.0

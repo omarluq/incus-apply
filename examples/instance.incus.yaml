@@ -1,0 +1,8 @@
+# Basic Debian container
+type: instance
+name: app
+image: images:debian/13
+config:
+  limits.cpu: "2"
+  limits.memory: 1GiB
+description: Application backend container
