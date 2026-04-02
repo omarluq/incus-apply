@@ -1,5 +1,7 @@
 # incus-apply
 
+[![CI](https://github.com/abiosoft/incus-apply/actions/workflows/go.yml/badge.svg)](https://github.com/abiosoft/incus-apply/actions/workflows/go.yml)
+
 Declarative configuration management for [Incus](https://linuxcontainers.org/incus/).
 
 ## Installation
