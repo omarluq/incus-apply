@@ -245,7 +245,7 @@ The [examples](./examples/) directory contains ready-to-run configurations cover
 - **[incus-vm](./examples/incus-vm/)** — Spin up a nested Incus environment inside a Debian VM, complete with the Zabbly kernel and ZFS storage, trusted automatically by the host.
 - **[wordpress](./examples/wordpress/)** — Deploy a full WordPress stack three ways: OCI application containers, a Debian system container, or a virtual machine — all provisioned via cloud-init in a single `incus-apply` run.
 - **[incus-os](./examples/incus-os/)** — Download Incus OS iso and create an [Incus OS](https://github.com/lxc/incus-os) installation.
-- **[windows/](./examples/windows/)** — Download Windows 11 iso and create a Windows 11 AMD64 VM installation.
+- **[windows](./examples/windows/)** — Download Windows 11 iso and create a Windows 11 AMD64 VM installation.
 
 ## Advanced Notes
 
