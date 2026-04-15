@@ -28,7 +28,7 @@ devices:
 config:
   limits.cpu: "2"
   limits.memory: 2GiB
-  cloud-init.user-data: |
+  cloud-init.user-data:
     #cloud-config
     package_update: true
     packages:
